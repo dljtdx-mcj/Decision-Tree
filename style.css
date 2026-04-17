@@ -241,3 +241,14 @@ input[type="range"] { width: 100%; accent-color: var(--primary); }
 @media (max-width: 1100px) {
   .layout-grid, .model-visual-grid, .step-layout { grid-template-columns: 1fr; }
 }
+
+/* =========================================
+   新增：分步画树按钮样式 (完全契合薄荷绿风格)
+   ========================================= */
+.title-actions { display: flex; gap: 8px; align-items: center; }
+.tiny-outline-btn {
+  padding: 6px 12px; border: 1px solid #0d9488; background: #ffffff;
+  color: #0d9488; font-size: 12px; border-radius: 8px; font-weight: bold;
+  cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+.tiny-outline-btn:hover { background: #f0fdfa; transform: translateY(-1px); }
