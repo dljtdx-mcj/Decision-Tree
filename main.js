@@ -8,6 +8,8 @@
     playbackValue: 50, // 0 to 100 representing probability mapping
     playTimer: null,
     chartObj: null,
+    diagramStep: -1, // -1 means show full diagram
+    maxDiagramStep: 0,
     diagramTransform: { x: 0, y: 0, scale: 1 },
     drag: { active: false, startX: 0, startY: 0, origX: 0, origY: 0 }
   };
@@ -30,7 +32,9 @@
     playBtn: document.getElementById('play-btn'),
     pauseBtn: document.getElementById('pause-btn'),
     playbackRange: document.getElementById('playback-range'),
-    playbackLabel: document.getElementById('playback-step-label')
+    playbackLabel: document.getElementById('playback-step-label'),
+    stepDrawBtn: document.getElementById('step-draw-btn'),
+    fullDrawBtn: document.getElementById('full-draw-btn')
   };
 
   function currentModel() { return models[state.modelIndex]; }
@@ -62,7 +66,8 @@
       btn.addEventListener('click', () => {
         stopPlayback();
         state.modelIndex = Number(btn.dataset.idx);
-        state.playbackValue = 50; // Reset
+        state.playbackValue = 50;
+        state.diagramStep = -1; // 切换模型时重置为完整显示
         rerenderAll();
       });
     });
@@ -93,7 +98,7 @@
     dom.paramForm.querySelectorAll('input').forEach(inp => {
       inp.addEventListener('change', () => {
         state.params[m.id][inp.dataset.key] = Number(inp.value);
-        updateData();
+        updateData(); // 数值改变时只刷新数据和图表，不改变画树进度
       });
     });
   }
@@ -103,31 +108,28 @@
     const m = currentModel();
     const isSingle = m.id === 'single';
     const series = [];
-    const points = 21; // 0 to 100, step 5
+    const points = 21;
 
     for (let i = 0; i <= 100; i += 5) {
       let probVar = i / 100;
       let row = { p: probVar };
 
       if (isSingle) {
-        // P1 varies 0~1. P2, P3, P4 scale to fill the remaining (1 - P1)
-        // Default ratios: P2:P3:P4 = 5:2:2 (from F2=0.5, F3=0.2, F4=0.2, sum=0.9)
         let remain = 1 - probVar;
         let p2 = remain * (5/9), p3 = remain * (2/9), p4 = remain * (2/9);
-        
+
         row.ev1 = 180*probVar + 90*p2 - 30*p3 - 60*p4;
         row.ev2 = 120*probVar + 60*p2 + 20*p3 - 10*p4;
         row.ev3 =  80*probVar + 30*p2 + 40*p3 + 10*p4;
         row.best = Math.max(row.ev1, row.ev2, row.ev3);
         row.bestName = row.ev1 === row.best ? 'A1(大型)' : (row.ev2 === row.best ? 'A2(中型)' : 'A3(租赁)');
       } else {
-        // Multi-level: probVar = P(Rain)
         let pRain = probVar;
         let pNoRain = 1 - pRain;
-        let evZ1 = 0.5 * (-30000) + 0.3 * (-22500) + 0.2 * (-15000); // -24750
+        let evZ1 = 0.5 * (-30000) + 0.3 * (-22500) + 0.2 * (-15000);
         let evZ2 = -25000;
-        let bestZ = Math.max(evZ1, evZ2); // max because cost is negative
-        
+        let bestZ = Math.max(evZ1, evZ2);
+
         row.evX2 = pNoRain * 0 + pRain * bestZ;
         row.evX1 = -15000;
         row.best = Math.max(row.evX1, row.evX2);
@@ -143,10 +145,10 @@
     const m = currentModel();
     const currentIdx = Math.round(state.playbackValue / 5);
     const currentRow = data[currentIdx];
-    
+
     // Update Chart
     const labels = data.map(d => `${Math.round(d.p * 100)}%`);
-    const datasets = m.id === 'single' 
+    const datasets = m.id === 'single'
       ? [
           { label: '方案 A1', data: data.map(d => d.ev1), borderColor: '#0d9488', tension: 0.1 },
           { label: '方案 A2', data: data.map(d => d.ev2), borderColor: '#f59e0b', tension: 0.1 },
@@ -175,9 +177,9 @@
 
     // Update Table
     const isSingle = m.id === 'single';
-    let ths = isSingle ? `<th>核心概率(P1)</th><th>A1 期望值</th><th>A2 期望值</th><th>A3 期望值</th><th>最优方案</th>` 
+    let ths = isSingle ? `<th>核心概率(P1)</th><th>A1 期望值</th><th>A2 期望值</th><th>A3 期望值</th><th>最优方案</th>`
                        : `<th>下雨概率</th><th>X1 期望成本</th><th>X2 期望成本</th><th>最优方案</th>`;
-    
+
     dom.table.innerHTML = `
       <thead><tr>${ths}</tr></thead>
       <tbody>
@@ -200,10 +202,10 @@
     renderDiagram(currentRow);
   }
 
-  // --- SVG Diagram Rendering ---
+  // --- 分步 SVG Diagram Rendering ---
   function renderDiagram(row) {
     const m = currentModel();
-    let svgStr = '';
+    let steps = []; // 存储每一步要绘制的 SVG 字符串
     const w = 800, h = 460;
 
     const buildNode = (type, x, y, label, val = null) => {
@@ -211,7 +213,7 @@
       if (type === 'dec') shape = `<rect x="${x-15}" y="${y-15}" width="30" height="30" fill="#fff" stroke="#0d9488" stroke-width="3"/>`;
       if (type === 'state') shape = `<circle cx="${x}" cy="${y}" r="15" fill="#fff" stroke="#f59e0b" stroke-width="3"/>`;
       if (type === 'res') shape = `<polygon points="${x},${y-15} ${x+15},${y+10} ${x-15},${y+10}" fill="#e2e8f0" stroke="#64748b" stroke-width="2"/>`;
-      
+
       let text = `<text x="${x}" y="${y-20}" text-anchor="middle" font-size="12" font-weight="bold" fill="#334155">${label}</text>`;
       let valText = val !== null ? `<text x="${x+20}" y="${y+5}" font-size="13" font-weight="bold" fill="#0f766e">${val}</text>` : '';
       return `<g>${shape}${text}${valText}</g>`;
@@ -226,60 +228,55 @@
     if (m.id === 'single') {
       let remain = 1 - row.p;
       let p2 = remain * (5/9), p3 = remain * (2/9), p4 = remain * (2/9);
-      
-      // Root Decision
-      svgStr += buildNode('dec', 100, 230, '决策点');
-      
-      // States (A1, A2, A3)
+
+      steps.push(buildNode('dec', 100, 230, '决策点')); // Step 1
+
       [
         { id: 'A1', y: 80, ev: row.ev1.toFixed(1) },
         { id: 'A2', y: 230, ev: row.ev2.toFixed(1) },
         { id: 'A3', y: 380, ev: row.ev3.toFixed(1) }
       ].forEach(s => {
-        svgStr += buildLine(115, 230, 285, s.y, s.id);
-        svgStr += buildNode('state', 300, s.y, s.id, s.ev);
-        
-        // 4 results per state
+        steps.push(buildLine(115, 230, 285, s.y, s.id) + buildNode('state', 300, s.y, s.id, s.ev)); // 枝条 + 状态节点
+
         let rY = s.y - 45;
         ['T1', 'T2', 'T3', 'T4'].forEach((t, i) => {
           let pVal = i===0 ? row.p : i===1 ? p2 : i===2 ? p3 : p4;
-          svgStr += buildLine(315, s.y, 485, rY, `${t}(${pVal.toFixed(2)})`);
-          svgStr += buildNode('res', 500, rY, '');
+          steps.push(buildLine(315, s.y, 485, rY, `${t}(${pVal.toFixed(2)})`) + buildNode('res', 500, rY, '')); // 结果枝条
           rY += 30;
         });
       });
     } else {
-      // Multi-level
-      svgStr += buildNode('dec', 80, 230, '阶段一 X');
-      
-      // X1
-      svgStr += buildLine(95, 230, 285, 100, 'X1 加班');
-      svgStr += buildNode('res', 300, 100, '', '-15000');
-      
-      // X2 -> Y
-      svgStr += buildLine(95, 230, 285, 300, 'X2 正常');
-      svgStr += buildNode('state', 300, 300, 'Y', row.evX2.toFixed(0));
-      
-      // Y -> No Rain
-      svgStr += buildLine(315, 300, 485, 200, `无雨(${(1-row.p).toFixed(2)})`);
-      svgStr += buildNode('res', 500, 200, '', '0');
-      
-      // Y -> Rain -> Z
-      svgStr += buildLine(315, 300, 485, 380, `下雨(${(row.p).toFixed(2)})`);
-      svgStr += buildNode('dec', 500, 380, '阶段二 Z', '-24750');
-      
-      // Z -> Z1 -> R
-      svgStr += buildLine(515, 380, 635, 330, 'Z1 紧急');
-      svgStr += buildNode('state', 650, 330, 'R', '-24750');
-        svgStr += buildLine(665, 330, 735, 280, '省1天(0.5)'); svgStr += buildNode('res', 750, 280, '', '-30000');
-        svgStr += buildLine(665, 330, 735, 330, '省2天(0.3)'); svgStr += buildNode('res', 750, 330, '', '-22500');
-        svgStr += buildLine(665, 330, 735, 380, '省3天(0.2)'); svgStr += buildNode('res', 750, 380, '', '-15000');
-      
-      // Z -> Z2
-      svgStr += buildLine(515, 380, 635, 430, 'Z2 正常');
-      svgStr += buildNode('res', 650, 430, '', '-25000');
+      steps.push(buildNode('dec', 80, 230, '阶段一 X')); // Step 1
+
+      steps.push(buildLine(95, 230, 285, 100, 'X1 加班') + buildNode('res', 300, 100, '', '-15000'));
+      steps.push(buildLine(95, 230, 285, 300, 'X2 正常') + buildNode('state', 300, 300, 'Y', row.evX2.toFixed(0)));
+      steps.push(buildLine(315, 300, 485, 200, `无雨(${(1-row.p).toFixed(2)})`) + buildNode('res', 500, 200, '', '0'));
+      steps.push(buildLine(315, 300, 485, 380, `下雨(${(row.p).toFixed(2)})`) + buildNode('dec', 500, 380, '阶段二 Z', '-24750'));
+      steps.push(buildLine(515, 380, 635, 330, 'Z1 紧急') + buildNode('state', 650, 330, 'R', '-24750'));
+
+      steps.push(buildLine(665, 330, 735, 280, '省1天(0.5)') + buildNode('res', 750, 280, '', '-30000'));
+      steps.push(buildLine(665, 330, 735, 330, '省2天(0.3)') + buildNode('res', 750, 330, '', '-22500'));
+      steps.push(buildLine(665, 330, 735, 380, '省3天(0.2)') + buildNode('res', 750, 380, '', '-15000'));
+
+      steps.push(buildLine(515, 380, 635, 430, 'Z2 正常') + buildNode('res', 650, 430, '', '-25000'));
     }
 
+    state.maxDiagramStep = steps.length;
+
+    // -1 表示完整显示，或者当前步数溢出时纠正
+    if (state.diagramStep === -1 || state.diagramStep > state.maxDiagramStep) {
+      state.diagramStep = state.maxDiagramStep;
+    }
+
+    // 更新按钮文字
+    if (state.diagramStep >= state.maxDiagramStep) {
+      dom.stepDrawBtn.textContent = '从头分步画树';
+    } else {
+      dom.stepDrawBtn.textContent = `绘制下一步 (${state.diagramStep}/${state.maxDiagramStep})`;
+    }
+
+    // 根据步数截取 SVG 并渲染
+    let svgStr = steps.slice(0, state.diagramStep).join('');
     dom.diagramContainer.innerHTML = `<svg width="100%" height="100%" viewBox="0 0 ${w} ${h}">${svgStr}</svg>`;
   }
 
@@ -295,11 +292,11 @@
     renderMeta();
     renderForm();
     renderStepsCode();
-    
+
     dom.playbackRange.value = state.playbackValue;
     dom.playbackLabel.textContent = `核心概率：${state.playbackValue}%`;
     updateData();
-    
+
     if(window.MathJax) window.MathJax.typesetPromise();
   }
 
@@ -314,7 +311,7 @@
       if (state.playbackValue > 100) state.playbackValue = 0;
       dom.playbackRange.value = state.playbackValue;
       dom.playbackLabel.textContent = `核心概率：${state.playbackValue}%`;
-      updateData();
+      updateData(); // 自动播放时依然保留画树进度
     }, 600);
   }
 
@@ -327,7 +324,22 @@
     updateData();
   });
 
-  // Drag interaction for diagram
+  // --- 画树交互事件 ---
+  dom.stepDrawBtn.addEventListener('click', () => {
+    if (state.diagramStep >= state.maxDiagramStep) {
+      state.diagramStep = 1; // 重新从第一步开始画
+    } else {
+      state.diagramStep++; // 画下一步
+    }
+    updateData(); // 重新触发渲染
+  });
+
+  dom.fullDrawBtn.addEventListener('click', () => {
+    state.diagramStep = state.maxDiagramStep; // 恢复完整显示
+    updateData();
+  });
+
+  // --- Drag interaction for diagram ---
   dom.diagramStage.addEventListener('mousedown', e => {
     state.drag.active = true; state.drag.startX = e.clientX; state.drag.startY = e.clientY;
     state.drag.origX = state.diagramTransform.x; state.drag.origY = state.diagramTransform.y;
