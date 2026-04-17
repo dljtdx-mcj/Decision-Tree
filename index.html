@@ -41,7 +41,7 @@
           </svg>
           Decision Tree Method · Interactive Learning
         </div>
-        
+
         <h1>风险型决策树计算<br>全景交互系统</h1>
 
         <div class="hero-author">
@@ -120,7 +120,11 @@
               <div class="diagram-card">
                 <div class="section-title-row">
                   <h3>决策树结构</h3>
-                  <span class="tiny-pill">逆向推演法</span>
+                  <!-- 新增的按步画树按钮区 -->
+                  <div class="title-actions">
+                    <button class="tiny-outline-btn" id="step-draw-btn">从头分步画树</button>
+                    <button class="tiny-outline-btn" id="full-draw-btn">完整显示</button>
+                  </div>
                 </div>
                 <div class="diagram-hint">矩形: 决策点｜圆形: 状态点｜三角形: 结果点 (末梢)</div>
                 <div class="diagram-stage" id="diagram-stage">
